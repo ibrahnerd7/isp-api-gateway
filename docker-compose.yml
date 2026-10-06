@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  isp-api:
+    build: .
+    container_name: isp-api
+    ports:
+      -"8080:8080"
+    environment:
+      - DATABASE_URL=postgres://radius:radpass@postgres_db:5432/radius?sslmode=disable
+      - ROUTER_IP=192.168.64.3
+      - RADIUS_SECRET=testing123
+    depends_on:
+      - postgres_db
+
+  postgres_db:
+  image: postgres:15-alpine
+  container_name: postgres_db
+  environment:
+      - POSTGRES_USER=radius
+      - POSTGRES_PASSWORD=radpass
+      - POSTGRES_DB=radius
+  ports:
+      - "5432:5432"
