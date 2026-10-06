@@ -1,0 +1,44 @@
+package main
+
+import (
+	"context",
+	"database/sql",
+	"encoding/json",
+	"fmt",
+	"log",
+	"net/http",
+	"os",
+	"os/exec",
+	"time"
+
+	- "github.com/lib/pq"
+)
+
+type AppContext struct {
+	DB *sql.DB
+	RouterIP string
+	RadiusSecret string
+}
+
+type SubscriberRequest struct {
+	Username string `json:"username"`
+	Group string `json:"group"`
+}
+
+func main(){
+	// Load config from env variables
+	dbURL := os.Getenv("DATABASE_URL")
+	routerIP := os.Getenv("ROUTER_IP")
+	radiusSecret := os.Getenv("RADIUS_SECRET")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	// Connect to PostgreSQL
+	db, err := sql.Open("postgres", dbURL)
+	if err := db.Ping(); err != nil {
+		log.Fatalf("DB Unreachable: %v", err)
+	}
+	log.Println("Connect to PostgreSQL")
+}
