@@ -41,4 +41,12 @@ func main(){
 		log.Fatalf("DB Unreachable: %v", err)
 	}
 	log.Println("Connect to PostgreSQL")
+
+	app := &AppContext{
+		DB: db,
+		RouterIP: routerIP,
+		RadiusSecret: radiusSecret,
+	}
+
+	// Set up REST Routes
 }
