@@ -58,3 +58,30 @@ func main(){
 	log.Printf("Starting ISP API on port %s", port)
 	http.ListenAndServe(":"+port, mux)
 }
+
+// handleSuspendUser updates Postgres and fires the RADIUS disconnect
+func (app *AppContext) handleSuspendUser(w http.ResponseWriter, r *http.Request) {
+	var req SubscriberRequest
+	json.NewDecoder(r.Body).Decode(&req)
+
+	// 1. Update Database
+	_, err := app.DB.Exec("UPDATE radusergroup SET groupname = 'Suspended_Users' WHERE username = $1", req.Username)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// 2. Fire Packet of Disconnect via shell
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "radclient", fmt.Sprintf("%s:3799", app.RouterIP), "disconnect", app.RadiusSecret)
+	cmd.Stdin = fmt.StringReader(fmt.Sprintf("User-Name=%s\n", req.Username))
+
+	if err := cmd.Run(); err !=nil {
+		log.Printf("Failed to disconnect %s: %v", req.Username, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w.Encode(map[string]string{"status": "success", "user":req.Username, "action": "suspended"}))
+}
