@@ -49,4 +49,12 @@ func main(){
 	}
 
 	// Set up REST Routes
+	mux := http.NewServerMux()
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request)) {
+		w.Write([]byte("ISP API Gateway is Online\n"))
+	}
+	mux.HandleFunc("POST /api/suspend", app.handleSuspendUser)
+	
+	log.Printf("Starting ISP API on port %s", port)
+	http.ListenAndServe(":"+port, mux)
 }
