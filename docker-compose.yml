@@ -21,4 +21,4 @@ services:
       - POSTGRES_PASSWORD=radpass
       - POSTGRES_DB=radius
     ports:
-      - "5432:5432"
+      - "5433:5432"

@@ -1,31 +1,32 @@
 package main
 
 import (
-	"context",
-	"database/sql",
-	"encoding/json",
-	"fmt",
-	"log",
-	"net/http",
-	"os",
-	"os/exec",
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
 
-	- "github.com/lib/pq"
+	_ "github.com/lib/pq"
 )
 
 type AppContext struct {
-	DB *sql.DB
-	RouterIP string
+	DB           *sql.DB
+	RouterIP     string
 	RadiusSecret string
 }
 
 type SubscriberRequest struct {
 	Username string `json:"username"`
-	Group string `json:"group"`
+	Group    string `json:"group"`
 }
 
-func main(){
+func main() {
 	// Load config from env variables
 	dbURL := os.Getenv("DATABASE_URL")
 	routerIP := os.Getenv("ROUTER_IP")
@@ -37,24 +38,27 @@ func main(){
 
 	// Connect to PostgreSQL
 	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to open DB connection: %v", err)
+	}
 	if err := db.Ping(); err != nil {
 		log.Fatalf("DB Unreachable: %v", err)
 	}
-	log.Println("Connect to PostgreSQL")
+	log.Println("Connected to PostgreSQL")
 
 	app := &AppContext{
-		DB: db,
-		RouterIP: routerIP,
+		DB:           db,
+		RouterIP:     routerIP,
 		RadiusSecret: radiusSecret,
 	}
 
 	// Set up REST Routes
-	mux := http.NewServerMux()
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request)) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ISP API Gateway is Online\n"))
-	}
+	})
 	mux.HandleFunc("POST /api/suspend", app.handleSuspendUser)
-	
+
 	log.Printf("Starting ISP API on port %s", port)
 	http.ListenAndServe(":"+port, mux)
 }
@@ -62,7 +66,12 @@ func main(){
 // handleSuspendUser updates Postgres and fires the RADIUS disconnect
 func (app *AppContext) handleSuspendUser(w http.ResponseWriter, r *http.Request) {
 	var req SubscriberRequest
-	json.NewDecoder(r.Body).Decode(&req)
+	
+	// Safely decode the JSON payload
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+		return
+	}
 
 	// 1. Update Database
 	_, err := app.DB.Exec("UPDATE radusergroup SET groupname = 'Suspended_Users' WHERE username = $1", req.Username)
@@ -76,12 +85,17 @@ func (app *AppContext) handleSuspendUser(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "radclient", fmt.Sprintf("%s:3799", app.RouterIP), "disconnect", app.RadiusSecret)
-	cmd.Stdin = fmt.StringReader(fmt.Sprintf("User-Name=%s\n", req.Username))
-
-	if err := cmd.Run(); err !=nil {
+	cmd.Stdin = strings.NewReader(fmt.Sprintf("User-Name=%s\n", req.Username))
+	
+	if err := cmd.Run(); err != nil {
 		log.Printf("Failed to disconnect %s: %v", req.Username, err)
 	}
 
+	// 3. Return JSON Response
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w.Encode(map[string]string{"status": "success", "user":req.Username, "action": "suspended"}))
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "success",
+		"user":   req.Username,
+		"action": "suspended",
+	})
 }
