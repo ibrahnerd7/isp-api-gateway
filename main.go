@@ -54,8 +54,23 @@ func main() {
 		port = "8080"
 	}
 
-	// Connect to PostgreSQL
-	db, err := sql.Open("postgres", dbURL)
+	// Connect to PostgreSQL with a Retry loop
+	var db *sql.DB
+	var err error
+	
+	for i := 1; i <= 5; i++ {
+		db, err = sql.Open("postgres", dbURL)
+		if err == nil {
+			err = db.Ping()
+			if err == nil {
+				break // Success! Exit the loop
+			}
+		}
+		log.Printf("Database not ready (Attemp %d/5). Retrying in 3 seconds...", i)
+		time.Sleep(3 * time.Second)
+
+	}
+
 	if err != nil {
 		log.Fatalf("Failed to open DB connection: %v", err)
 	}
