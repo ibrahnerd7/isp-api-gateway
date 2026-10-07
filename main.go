@@ -76,7 +76,7 @@ func main() {
 		w.Write([]byte("ISP API Gateway is Online\n"))
 	})
 	mux.HandleFunc("POST /api/suspend", app.handleSuspendUser)
-	mux.HandleFunc("PIST /api/webhooks/mpesa", app.handleMpesaWebhook)
+	mux.HandleFunc("POST /api/webhooks/mpesa", app.handleMpesaWebhook)
 
 
 	log.Printf("Starting ISP API on port %s", port)
@@ -120,9 +120,9 @@ func (app *AppContext) handleSuspendUser(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (app *AppContext) handleMpesaWebhook(w http.ResponseWriter, r* http.Request) {
+func (app *AppContext) handleMpesaWebhook(w http.ResponseWriter, r *http.Request) {
 	var callback MpesaCallback
-
+	
 	if err := json.NewDecoder(r.Body).Decode(&callback); err != nil {
 		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
 		return
@@ -130,14 +130,14 @@ func (app *AppContext) handleMpesaWebhook(w http.ResponseWriter, r* http.Request
 
 	stk := callback.Body.StkCallback
 
-	//ResultCode 0 means the customer successfully paid
+	// ResultCode 0 means the customer successfully paid
 	if stk.ResultCode == 0 {
 		var phoneNumber string
 		var amount float64
 
 		// Extract payment details from the Metadata array
 		for _, item := range stk.CallbackMetadata.Item {
-			if item.Name  == "PhoneNumber" {
+			if item.Name == "PhoneNumber" {
 				// Safaricom sends numbers as floats in JSON, convert safely
 				phoneNumber = fmt.Sprintf("%.0f", item.Value.(float64))
 			}
@@ -151,31 +151,30 @@ func (app *AppContext) handleMpesaWebhook(w http.ResponseWriter, r* http.Request
 		// 1. Unsuspend the user in PostgreSQL
 		// (Assuming the phone number is used as the username for simplicity)
 		_, err := app.DB.Exec("UPDATE radusergroup SET groupname = 'Gold_Plan' WHERE username = $1", phoneNumber)
-		if err !=nil {
+		if err != nil {
 			log.Printf("Database error updating user %s: %v", phoneNumber, err)
 		}
 
-		// 2. Drop the dead/suspend session so the router forces a re-auth
+		// 2. Drop the dead/suspended session so the router forces a re-auth 
 		// and applies the new 'Gold_Plan' speed profile immediately
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer.cancel()
-
+		defer cancel()
+		
 		cmd := exec.CommandContext(ctx, "radclient", fmt.Sprintf("%s:3799", app.RouterIP), "disconnect", app.RadiusSecret)
-		cmd.Stdin = strings.NewReader(fmt.Sprint("User-Name=%s\n", phoneNumber))
-
-		if err :=cmd.Run(); err ==nil {
-			log.Printf("Successfullly unsuspended and bounced session for %s", phoneNumber)
+		cmd.Stdin = strings.NewReader(fmt.Sprintf("User-Name=%s\n", phoneNumber))
+		
+		if err := cmd.Run(); err == nil {
+			log.Printf("Successfully unsuspended and bounced session for %s", phoneNumber)
 		}
-	}
-	else {
-		// ResultCode !=0 means cancelled, failed, or timed out
+	} else {
+		// ResultCode != 0 means cancelled, failed, or timed out
 		log.Printf("Failed payment attempt: %s", stk.ResultDesc)
 	}
 
-	// Safaricom expects a simple success acknowledgment so they stop retrying 
-	w.Header().set("Content-Type", "application/json")
+	// Safaricom expects a simple success acknowledgment so they stop retrying
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"ResultCode":"0",
+		"ResultCode": "0",
 		"ResultDesc": "Accepted",
 	})
 }
