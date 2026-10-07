@@ -26,6 +26,24 @@ type SubscriberRequest struct {
 	Group    string `json:"group"`
 }
 
+// MpesaCallback matches the Safaricom STK Push JSON structure
+type MpesaCallback struct {
+	Body struct {
+		StkCallback struct {
+			MerchantRequestID string `json:"MerchantRequestID"`
+			CheckoutRequestID string `json:"CheckoutRequestID"`
+			ResultCode int `json:"ResultCode"`
+			ResultDesc string `json:"ResultDesc"`
+			CallbackMetadata struct {
+				Item []struct {
+					Name string `json:"Name"`
+					Value interface{} `json:"Value"`
+				} `json:"Item"`
+			} `json:"CallbackMetadata"`
+		} `json:"stkCallback"`
+	}`json: "Body"`
+}
+
 func main() {
 	// Load config from env variables
 	dbURL := os.Getenv("DATABASE_URL")
@@ -58,6 +76,8 @@ func main() {
 		w.Write([]byte("ISP API Gateway is Online\n"))
 	})
 	mux.HandleFunc("POST /api/suspend", app.handleSuspendUser)
+	mux.HandleFunc("PIST /api/webhooks/mpesa", app.handleMpesaWebhook)
+
 
 	log.Printf("Starting ISP API on port %s", port)
 	http.ListenAndServe(":"+port, mux)
@@ -97,5 +117,65 @@ func (app *AppContext) handleSuspendUser(w http.ResponseWriter, r *http.Request)
 		"status": "success",
 		"user":   req.Username,
 		"action": "suspended",
+	})
+}
+
+func (app *AppContext) handleMpesaWebhook(w http.ResponseWriter, r* http.Request) {
+	var callback MpesaCallback
+
+	if err := json.NewDecoder(r.Body).Decode(&callback); err != nil {
+		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	stk := callback.Body.StkCallback
+
+	//ResultCode 0 means the customer successfully paid
+	if stk.ResultCode == 0 {
+		var phoneNumber string
+		var amount float64
+
+		// Extract payment details from the Metadata array
+		for _, item := range stk.CallbackMetadata.Item {
+			if item.Name  == "PhoneNumber" {
+				// Safaricom sends numbers as floats in JSON, convert safely
+				phoneNumber = fmt.Sprintf("%.0f", item.Value.(float64))
+			}
+			if item.Name == "Amount" {
+				amount = item.Value.(float64)
+			}
+		}
+
+		log.Printf("Payment Received: Ksh %.2f from %s", amount, phoneNumber)
+
+		// 1. Unsuspend the user in PostgreSQL
+		// (Assuming the phone number is used as the username for simplicity)
+		_, err := app.DB.Exec("UPDATE radusergroup SET groupname = 'Gold_Plan' WHERE username = $1", phoneNumber)
+		if err !=nil {
+			log.Printf("Database error updating user %s: %v", phoneNumber, err)
+		}
+
+		// 2. Drop the dead/suspend session so the router forces a re-auth
+		// and applies the new 'Gold_Plan' speed profile immediately
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer.cancel()
+
+		cmd := exec.CommandContext(ctx, "radclient", fmt.Sprintf("%s:3799", app.RouterIP), "disconnect", app.RadiusSecret)
+		cmd.Stdin = strings.NewReader(fmt.Sprint("User-Name=%s\n", phoneNumber))
+
+		if err :=cmd.Run(); err ==nil {
+			log.Printf("Successfullly unsuspended and bounced session for %s", phoneNumber)
+		}
+	}
+	else {
+		// ResultCode !=0 means cancelled, failed, or timed out
+		log.Printf("Failed payment attempt: %s", stk.ResultDesc)
+	}
+
+	// Safaricom expects a simple success acknowledgment so they stop retrying 
+	w.Header().set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"ResultCode":"0",
+		"ResultDesc": "Accepted",
 	})
 }
