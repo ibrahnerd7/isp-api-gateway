@@ -92,6 +92,7 @@ func main() {
 	})
 	mux.HandleFunc("POST /api/suspend", app.handleSuspendUser)
 	mux.HandleFunc("POST /api/webhooks/mpesa", app.handleMpesaWebhook)
+	mux.HandleFunc("/", app.handleCaptivePortal) // Catch-all for the walled garden
 
 
 	log.Printf("Starting ISP API on port %s", port)
@@ -192,4 +193,33 @@ func (app *AppContext) handleMpesaWebhook(w http.ResponseWriter, r *http.Request
 		"ResultCode": "0",
 		"ResultDesc": "Accepted",
 	})
+}
+
+func (app *AppContext) handleCaptivePortal(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	html := `
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<title>Account Suspended</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<style>
+			body {font-family: -apple-system, sans-serif; text-align: center; padding: 10%; background: #f9fafb;}
+			.card {background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);}
+			h1 {color: #ef4444;}
+		</style>
+	</head>
+	<body>
+		<div class="card">
+			<h1>Connection Suspended</h1>
+			<p>Your monthly internet subscription has expired.</p>
+			<p>To instantly restore your connection, please pay <strong>Ksh 2,500</strong> via M-Pasa. </p>
+			<p>Paybill Number: <span class="paybill">123456</span></p>
+			<p>Account: <strong>Your Phone Number</strong>
+			<p><em>Your router will automatically reconnect within 10 seconds of payment.</em></p>
+		</div>
+	</body>
+	</html>
+	`
+	w.Write([]byte(html))
 }
